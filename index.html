@@ -1352,7 +1352,7 @@ async function endQuiz() {
   setInputEnabled(false);
   document.getElementById('quiz-progress-bar').style.width = '100%';
   document.getElementById('q-number').textContent = 'Quiz complete';
-  document.getElementById('quiz-hint').textContent = 'Quiz finished — click 📋 to view the instructor report.';
+  document.getElementById('quiz-hint').textContent = 'Submit your results using the button below to complete the quiz.';
 
   const pct = Math.round((quizScore/MAX_POINTS)*100);
 
@@ -1383,6 +1383,81 @@ Do NOT use JSON.`;
     quizRemoveTyping();
     quizAddMessage('bot', data.content?.[0]?.text || `Quiz complete. Score: ${quizScore}/${MAX_POINTS}.`);
   } catch(e) { quizRemoveTyping(); quizAddMessage('bot',`Quiz complete. Score: ${quizScore}/${MAX_POINTS}.`); }
+
+  // Add submit button directly in the chat flow
+  setTimeout(() => {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg bot';
+    const av = document.createElement('div');
+    av.className = 'msg-avatar cicero-av';
+    av.innerHTML = document.querySelector('.cicero-av')?.innerHTML || 'C';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = `<strong>One last thing, ${escHtml(studentName)}:</strong> please click the button below to submit your results to your professor. <em>Your quiz is not complete until you do.</em><br><br>
+      <button id="inline-submit-btn" style="padding:10px 22px;background:var(--ink);color:white;border:none;border-radius:var(--radius,6px);font-family:'Helvetica Neue',sans-serif;font-size:14px;cursor:pointer;letter-spacing:0.03em;">
+        📤 Submit results to professor
+      </button>
+      <div id="inline-submit-status" style="margin-top:10px;font-size:13px;font-family:'Helvetica Neue',sans-serif;color:var(--ink-muted,#5C5849);min-height:18px;"></div>`;
+    wrap.appendChild(av);
+    wrap.appendChild(bubble);
+    quizMessagesEl.appendChild(wrap);
+    quizMessagesEl.scrollTop = quizMessagesEl.scrollHeight;
+
+    document.getElementById('inline-submit-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('inline-submit-btn');
+      const status = document.getElementById('inline-submit-status');
+      btn.textContent = '⏳ Submitting…';
+      btn.disabled = true;
+      try {
+        // Trigger renderReport to populate lastReportData, then submit
+        const pct = Math.round((quizScore/MAX_POINTS)*100);
+        const gl = gradeLetter(pct);
+        // Build minimal report data for submission
+        const reportText = buildTextReport(0, 0, 0, 0,
+          Math.round((Date.now()-sessionStart)/60000),
+          new Date(), pct, gl.letter);
+        const payload = {
+          student_name: studentName || 'Unknown',
+          lesson: quizLesson || 'General',
+          quiz_score: quizScore,
+          quiz_max: MAX_POINTS,
+          quiz_pct: pct,
+          flagged_count: quizQuestions.filter(q=>q.flagged).length,
+          tab_switches: tabSwitches.length,
+          report_text: reportText
+        };
+        const submitUrl = WORKER_URL.endsWith('/')
+          ? WORKER_URL + 'submit-report'
+          : WORKER_URL + '/submit-report';
+        const resp = await fetch(submitUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if (result.ok) {
+          btn.textContent = '✓ Results submitted!';
+          btn.style.background = '#2D6A4F';
+          status.textContent = 'Your professor has received your results. You may now close this tab.';
+          status.style.color = '#2D6A4F';
+          // Also mark the report button as submitted
+          const reportSubmitBtn = document.getElementById('submit-report-btn');
+          if (reportSubmitBtn) {
+            reportSubmitBtn.textContent = '✓ Already submitted';
+            reportSubmitBtn.disabled = true;
+          }
+        } else {
+          throw new Error(result.error || 'Unknown error');
+        }
+      } catch(e) {
+        btn.textContent = '📤 Submit results to professor';
+        btn.disabled = false;
+        status.textContent = 'Something went wrong — please try again.';
+        status.style.color = 'var(--red,#8B1A1A)';
+        console.error('Submit error:', e);
+      }
+    });
+  }, 800);
 }
 
 function initQuiz() {
