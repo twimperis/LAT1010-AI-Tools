@@ -347,7 +347,7 @@
     <label class="field-label">Report passcode</label>
     <input type="password" id="cfg-report-pw" placeholder="Leave blank to keep unchanged"/>
     <label class="field-label">Course / textbook</label>
-    <input type="text" id="cfg-course" value="A New Latin Primer (English &amp; Irby, OUP 2015)"/>
+    <input type="text" id="cfg-course" value="Introduction to Roman Culture and Language I (LAT1010)"/>
     <label class="field-label">Lock tutor to this lesson (optional)</label>
     <select id="cfg-lesson">
       <option value="">— student selects —</option>
@@ -393,7 +393,7 @@
     <div class="logo">𝕸</div>
     <div class="header-text">
       <div class="header-title">Magister — Latin tutor</div>
-      <div class="header-sub" id="header-sub">Beginner · A New Latin Primer</div>
+      <div class="header-sub" id="header-sub">Beginner · LAT1010</div>
     </div>
     <div class="hdr-btns">
       <button class="icon-btn" id="open-report-btn" title="View instructor report">📋</button>
@@ -487,9 +487,9 @@
 let config = {
   apiKey: '',   // key is handled by the Cloudflare Worker — leave this blank
   studentPasscode: 'ROMA',
-  instructorPasscode: 'MAGISTER',
+  instructorPasscode: '0705',
   reportPasscode: 'GRADES',
-  course: 'A New Latin Primer (English & Irby, OUP 2015)',
+  course: 'Introduction to Roman Culture and Language I (LAT1010)',
   defaultLesson: '',
   extraPrompt: ''
 };
@@ -1406,6 +1406,9 @@ quizInput.addEventListener('input', ()=>{ quizInput.style.height='auto'; quizInp
 // ════════════════════════════════════════════════
 //  REPORT
 // ════════════════════════════════════════════════
+// Module-level report cache — populated when renderReport() runs
+let lastReportData = {};
+
 function renderReport() {
   const doc = document.getElementById('report-doc');
   const now = new Date();
@@ -1424,6 +1427,9 @@ function renderReport() {
   const qDone = quizQuestions.filter(q=>q.studentAnswer||q.awarded===0).length;
   const qPct  = MAX_POINTS > 0 ? Math.round((quizScore/MAX_POINTS)*100) : 0;
   const qGL   = gradeLetter(qPct);
+
+  // Cache for submit handler
+  lastReportData = { tutorTotal, avgAcc, avgGram, avgEng, duration, now, qPct, qGL };
 
   let exchangesHTML = exchangeLog.length === 0
     ? '<p style="font-size:13px;color:var(--ink-muted);font-family:\'Helvetica Neue\',sans-serif;">No tutor session exchanges recorded.</p>'
@@ -1529,11 +1535,54 @@ function renderReport() {
     <div class="report-actions">
       <button class="btn-sec" id="close-report">Close</button>
       <button class="btn-sec" id="copy-report-btn">📋 Copy as text</button>
+      <button class="btn-sec" id="submit-report-btn">📤 Submit to instructor</button>
       <button class="btn-pri" onclick="window.print()">🖨 Print / Save as PDF</button>
     </div>`;
 
   document.getElementById('report-overlay').classList.add('open');
   document.getElementById('close-report').addEventListener('click',()=>document.getElementById('report-overlay').classList.remove('open'));
+
+  document.getElementById('submit-report-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('submit-report-btn');
+    btn.textContent = '⏳ Submitting…';
+    btn.disabled = true;
+    try {
+      const {tutorTotal,avgAcc,avgGram,avgEng,duration,now,qPct,qGL} = lastReportData;
+      const payload = {
+        student_name: studentName || 'Unknown',
+        lesson: quizLesson || tutorLesson || 'General',
+        quiz_score: quizScore,
+        quiz_max: MAX_POINTS,
+        quiz_pct: qPct || 0,
+        flagged_count: quizQuestions.filter(q=>q.flagged).length,
+        tab_switches: tabSwitches.length,
+        report_text: buildTextReport(tutorTotal||0, avgAcc||0, avgGram||0, avgEng||0,
+          duration||0, now||new Date(), qPct||0, qGL?.letter||'—')
+      };
+      const submitUrl = WORKER_URL.endsWith('/')
+        ? WORKER_URL + 'submit-report'
+        : WORKER_URL + '/submit-report';
+      const resp = await fetch(submitUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await resp.json();
+      if (result.ok) {
+        btn.textContent = '✓ Submitted!';
+        btn.style.background = 'var(--green,#2D6A4F)';
+        btn.style.color = 'white';
+        btn.style.border = 'none';
+        btn.style.borderRadius = 'var(--radius,6px)';
+      } else {
+        throw new Error(result.error || 'Unknown error');
+      }
+    } catch(e) {
+      btn.textContent = '✗ Failed — try again';
+      btn.disabled = false;
+      console.error('Submit error:', e);
+    }
+  });
   document.getElementById('copy-report-btn').addEventListener('click',()=>{
     const text = buildTextReport(tutorTotal,avgAcc,avgGram,avgEng,duration,now,qPct,qGL.letter);
     navigator.clipboard.writeText(text).then(()=>{
