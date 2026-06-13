@@ -860,7 +860,7 @@ const quizSendBtn = document.getElementById('quiz-send-btn');
 const SECTIONS = [
   { key:'drill',    label:'Section I — Grammar, Vocabulary & Short Translation',  badge:'badge-grammar', time:30,  pts:2, twoAttempts:false },
   { key:'sentence', label:'Section II — Latin Sentence Comprehension',            badge:'badge-reading', time:120, pts:3, twoAttempts:false  },
-  { key:'culture',  label:'Section III — Culture & History',                      badge:'badge-culture', time:60,  pts:2, twoAttempts:false },
+  { key:'culture',  label:'Section III — Culture & History',                      badge:'badge-culture', time:45,  pts:2, twoAttempts:false },
 ];
 // Counts per section (total = 25)
 const SECTION_COUNTS = { drill:15, sentence:5, culture:5 };
@@ -895,6 +895,8 @@ async function generateQuestions() {
       drill: `Generate exactly ${count} Latin grammar, vocabulary, and short translation questions for ${config.course}, chapter: ${quizLesson}.
 Mix freely: case/number/gender identification (ONE property only), vocab translation, verb form identification (ONE property only), short phrase translation (2–6 words), and multiple-choice (4 options A–D, set "mc":true, "answer"=letter).
 RULES: Never put the answer in the question. For multi-meaning vocab, list answers as "X / Y / Z". One task per question only.
+FORMATTING: Do not add extraneous parentheses after answer choices or at the end of questions. Keep punctuation clean.
+LATIN ACCURACY: Never use the enclitic -que unless it genuinely connects two nouns, adjectives, or clauses in the same question (e.g. "senātusque populusque" is correct; attaching -que to a single isolated noun is wrong). If in doubt, use "et" instead.
 CONTEXT RULE: Grammar identification questions must always state ALL assumed context explicitly in the question — never leave case, number, or gender implied. Bad example: "Identify the number of 'bonī'." (leaves case implied) Good example: "In the nominative case, identify the number of 'bonī'." If a question asks about one property of a form that is ambiguous across cases, always specify which case you mean, or use a phrase or sentence to anchor the form unambiguously.
 MACRONS: Always include correct macrons on long vowels in every Latin word (e.g. amō, amāre, puella but puellae, rēx, lūna, vīta, fīlia, porta, portāre). This is a teaching tool — macrons are required.
 ONLY valid JSON array, no markdown:
@@ -904,6 +906,7 @@ ONLY valid JSON array, no markdown:
 Present a complete Latin sentence (7–15 words). Ask the student: "What does this sentence mean in English? Your translation can be rough, but should account for the major details."
 Wrap ALL Latin in <span class="latin">…</span>. Use authentic or authentically-styled Latin.
 MACRONS: Always include correct macrons on long vowels in every Latin word. This is a teaching tool — macrons are required.
+LATIN ACCURACY: Never use -que unless it genuinely connects two elements. Keep punctuation clean — no extraneous parentheses.
 "answer" = a clear model English paraphrase.
 ONLY valid JSON array, no markdown:
 [{"type":"sentence","question":"...","answer":"...","mc":false}]`,
@@ -913,6 +916,7 @@ IMPORTANT: Each question must be answerable with a single word, a name, or a sho
 Good examples: "What Roman office did Cicero hold in 63 BC?", "Name the goddess of wisdom.", "What Latin term describes a freed slave?"
 Draw on Roman cultural practices, historical events, famous Romans, social context from this chapter. Factual, clearly answerable.
 MC allowed: embed 4 options (A–D) in question, "mc":true, "answer"=correct letter. Never put the answer in the question.
+FORMATTING: No extraneous parentheses after options or at the end of questions.
 ONLY valid JSON array, no markdown:
 [{"type":"culture","question":"...","answer":"...","mc":false}]`
     };
@@ -997,7 +1001,7 @@ where N = points awarded out of the question's maximum.`;
 // ── Opening address — static, no API call needed ──
 function presentOpening() {
   const lesson = quizLesson.split(':')[0];
-  const intro = `Ah, ${studentName}! Welcome. I am Marcus Tullius Cicero, and I'll be your examiner today for ${lesson}.\n\nHere is what lies ahead:\n• <strong>Section I — Grammar, Vocabulary &amp; Short Translation:</strong> 15 questions · 30 seconds each\n• <strong>Section II — Latin Sentence Comprehension:</strong> 5 questions · 2 minutes each\n• <strong>Section III — Culture &amp; History:</strong> 5 questions · 1 minute each\n\n25 questions total, graded out of 50 points. If you need a nudge, type <strong>hint</strong> — you have three.\n\n<strong>Academic integrity:</strong> Copying quiz text and leaving this tab are both logged in the instructor report. If you switch away for more than 5 seconds during a question, this will be flagged for your professor's review.\n\nWhen you're ready, say the word.`;
+  const intro = `Ah, ${studentName}! Welcome. I am Marcus Tullius Cicero, and I'll be your examiner today for ${lesson}.\n\nHere is what lies ahead:\n• <strong>Section I — Grammar, Vocabulary &amp; Short Translation:</strong> 15 questions · 30 seconds each\n• <strong>Section II — Latin Sentence Comprehension:</strong> 5 questions · 2 minutes each\n• <strong>Section III — Culture &amp; History:</strong> 5 questions · 45 seconds each\n\n25 questions total, graded out of 50 points. If you need a nudge, type <strong>hint</strong> — you have three.\n\n<strong>Academic integrity:</strong> Copying quiz text and leaving this tab are both logged in the instructor report. If you switch away for more than 5 seconds during a question, this will be flagged for your professor's review.\n\nWhen you're ready, say the word.`;
   quizAddMessage('bot', intro);
   quizAwaitingStart = true;
   setInputEnabled(true);
@@ -1008,7 +1012,7 @@ function presentOpening() {
 // ── Section break — static, no API call ──
 function announceSectionBreak(sectionIndex) {
   const s = SECTIONS[sectionIndex];
-  const timeStr = s.time === 30 ? '30 seconds' : s.time === 60 ? 'one minute' : 'two minutes';
+  const timeStr = s.time === 30 ? '30 seconds' : s.time === 45 ? '45 seconds' : s.time === 60 ? 'one minute' : 'two minutes';
   const qCount = SECTION_COUNTS[s.key];
   const attemptsNote = s.twoAttempts ? ' You get two attempts on each.' : '';
   const remarks = [
