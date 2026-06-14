@@ -289,6 +289,45 @@
         <p>25 timed questions with Cicero — grammar, vocabulary, culture, and Latin reading. Graded out of 50 points.</p>
       </div>
     </div>
+    <div class="mode-option" id="go-story">
+      <div class="mo-icon">🏛</div>
+      <div class="mo-text">
+        <h3>Story: Coniūrātiō</h3>
+        <p>Race against the clock to unravel the Catilinarian Conspiracy — answer questions to advance the story. 30 minutes.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STORY APP -->
+<div id="story-app" style="display:none;flex-direction:column;width:100%;max-width:720px;height:100vh;">
+  <div style="padding:14px 20px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:14px;background:#2C1810;color:white;">
+    <div style="font-size:22px;">🏛</div>
+    <div style="flex:1;">
+      <div style="font-size:16px;font-weight:normal;letter-spacing:0.04em;font-family:Georgia,serif;color:#F5E8D0;">Coniūrātiō — The Conspiracy of Catiline</div>
+      <div style="font-size:11px;color:rgba(245,232,208,0.55);font-family:'Helvetica Neue',sans-serif;margin-top:1px;" id="story-header-sub">Introduction to Roman Culture and Language I (LAT1010)</div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <div id="story-timer-display" style="font-family:'Helvetica Neue',sans-serif;font-size:13px;font-weight:bold;color:#D4AF37;padding:4px 10px;border:0.5px solid rgba(212,175,55,0.4);border-radius:20px;min-width:60px;text-align:center;">30:00</div>
+      <div id="story-score-display" style="font-family:'Helvetica Neue',sans-serif;font-size:12px;color:rgba(245,232,208,0.7);padding:4px 10px;border:0.5px solid rgba(245,232,208,0.2);border-radius:20px;">0 pts</div>
+    </div>
+  </div>
+  <!-- Story progress bar (gates) -->
+  <div style="padding:8px 20px;background:#3A2415;border-bottom:0.5px solid rgba(212,175,55,0.2);display:flex;align-items:center;gap:10px;">
+    <div style="font-size:11px;font-family:'Helvetica Neue',sans-serif;color:rgba(212,175,55,0.7);white-space:nowrap;">Progress:</div>
+    <div style="flex:1;position:relative;height:8px;background:rgba(255,255,255,0.1);border-radius:4px;">
+      <div id="story-progress-bar" style="height:8px;background:#D4AF37;border-radius:4px;width:0%;transition:width 0.5s ease;"></div>
+      <!-- Gate markers -->
+      <div style="position:absolute;top:-2px;left:33%;width:2px;height:12px;background:rgba(212,175,55,0.5);border-radius:1px;" title="Gate I"></div>
+      <div style="position:absolute;top:-2px;left:66%;width:2px;height:12px;background:rgba(212,175,55,0.5);border-radius:1px;" title="Gate II"></div>
+    </div>
+    <div id="story-gate-label" style="font-size:11px;font-family:'Helvetica Neue',sans-serif;color:rgba(212,175,55,0.7);white-space:nowrap;">Prologue</div>
+  </div>
+  <div class="quiz-messages" id="story-messages" style="-webkit-user-select:none;user-select:none;"></div>
+  <div style="padding:5px 20px;border-top:0.5px solid var(--border);background:white;font-size:11px;color:var(--ink-light);font-family:'Helvetica Neue',sans-serif;" id="story-hint-bar">Press Enter to submit · type "hint" for a clue (3 available)</div>
+  <div style="padding:12px 20px;border-top:0.5px solid var(--border);background:white;display:flex;gap:8px;align-items:flex-end;">
+    <textarea id="story-input" placeholder="Your answer…" rows="1" style="flex:1;resize:none;padding:9px 12px;font-size:14px;font-family:'Helvetica Neue',sans-serif;border:0.5px solid var(--border-strong);border-radius:var(--radius);min-height:40px;max-height:120px;line-height:1.5;background:var(--stone);color:var(--ink);outline:none;"></textarea>
+    <button id="story-send-btn" style="width:40px;height:40px;border-radius:var(--radius);border:none;background:#2C1810;color:#D4AF37;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;">&#9658;</button>
   </div>
 </div>
 
@@ -512,9 +551,10 @@ let config = {
 const WORKER_URL = 'https://lat1010chat.twimperis.workers.dev';
 
 async function apiFetch(body) {
+  // Use text/plain to avoid triggering a CORS preflight OPTIONS request
   const resp = await fetch(WORKER_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({ model: 'claude-sonnet-4-6', ...body })
   });
   if (!resp.ok) {
@@ -1749,6 +1789,584 @@ function gradeLetter(score) {
   return {letter:'D / F',cls:'grade-d'};
 }
 function clamp(n,lo=0,hi=100){return Math.min(hi,Math.max(lo,Number(n)||0));}
+
+// ════════════════════════════════════════════════
+//  STORY MODE — CONIŪRĀTIŌ
+// ════════════════════════════════════════════════
+
+// ── Go-story handler ──
+document.getElementById('go-story').addEventListener('click', () => {
+  document.getElementById('mode-select-overlay').classList.remove('open');
+  document.getElementById('story-app').style.display = 'flex';
+  document.getElementById('story-app').style.flexDirection = 'column';
+  initStory();
+});
+
+// ── Story state ──
+let storyActive     = false;
+let storyDone       = false;
+let storyTimerInt   = null;
+let storyTimeLeft   = 30 * 60; // 30 minutes in seconds
+let storyScore      = 0;
+let storyQIndex     = 0;       // current question index within current gate
+let storyGate       = 0;       // 0=prologue, 1,2,3 = gates
+let storyHints      = 3;
+let storyProcessing = false;
+let storyAwaitingNext = false;
+let storyQuestions  = [];      // questions for current gate, loaded as needed
+let storyTotalQAnswered = 0;
+let storyTabSwitches = [];
+let storyTabHiddenAt = null;
+
+const STORY_GATES = [
+  { num:1, threshold:6,  label:'Gate I — The Meeting Place',    unlock:'gate1' },
+  { num:2, threshold:12, label:'Gate II — The Letter',          unlock:'gate2' },
+  { num:3, threshold:18, label:'Gate III — The Senate',         unlock:'gate3' },
+];
+
+const STORY_TIME_LIMIT = 30 * 60;
+
+// ── Pre-authored story content ──
+const STORY_CONTENT = {
+  prologue: `Annus est sexāgēsimus tertius ante Christum nātum. Ego, Mārcus Tullius Cicerō, cōnsul Rōmānus, haec ad tē scrībō — nōn epistulam amīcītiāe, sed prō salūte Rōmae.
+
+A man named Lūcius Sergius Catilīna has gathered desperate men around him — debtors, the disgraced, the dangerous — and they plot to seize Rome by fire and sword. I have my suspicions. I have fragments of their plans. But I cannot act alone, and I cannot act without proof.
+
+You, [NAME], are my most trusted agent. The city's fate rests on what we discover together. Answer my questions correctly and the path forward reveals itself. Answer poorly and precious time is lost — and we have only 30 minutes before Catiline's men act.
+
+Prō Rōmā! Let us begin.`,
+
+  gate1_reveal: `Euge, [NAME]! By the gods, you have done it.
+
+Through your answers, I have confirmed what my sources only whispered: the conspirators have been meeting in secret at the house of Marcus Porcius Laeca, on the Street of the Sickle-Makers, in the dead of night. I myself attended one such meeting in disguise — and Catiline openly assigned roles to his assassins.
+
+<strong>🏛 Gate I Unlocked — The Meeting Place: Via Falcaria, domus Laecae</strong>
+
+This is our first proof. But a meeting place is not enough to convict a man before the Senate. We need the letter. Press on — there are more clues to uncover, and the clock is against us.`,
+
+  gate2_reveal: `Incredibile! You have surpassed my hopes, [NAME].
+
+Among Catiline's papers — intercepted by a Gaul who thought better of his treachery — we have found the letters. Sealed with his ring. In his own hand. They promise fire, massacre, and the destruction of the Republic to his confederates in Etruria.
+
+<strong>📜 Gate II Unlocked — The Letter Intercepted</strong>
+
+I have the letters. I have the conspirators' names. On the third of December, I summoned the Senate to the Temple of Concord and read the letters aloud. The Senate declared a state of emergency — the senātus consultum ultimum. Catiline fled to his army in Etruria that very night.
+
+But the conspirators remaining in Rome — Lentulus, Cethegus, the others — are still free. One final act of courage is needed. Can you see it through?`,
+
+  gate3_reveal: `Ō tempora, ō mōrēs! [NAME], you have saved Rome.
+
+On the fifth of December, the Senate voted. The conspirators were executed without trial — a decision that would haunt me for the rest of my life, but one I believed necessary to save the Republic. Catiline died in battle at Pistoria in January, fighting to the last.
+
+I stood before the Roman people that night and spoke words that still echo: <span class="latin">Vīxērunt</span> — "They have lived." The perfect tense of vīvere — a Roman euphemism for death, precise and final.
+
+<strong>🏆 Gate III Unlocked — The Conspiracy Defeated. Rome is saved.</strong>
+
+Your secret phrase, proof of your completed mission: <strong>VĪXĒRUNT · SPQR · [CODE]</strong>
+
+Screenshot this or copy it, and submit your results below. Vale, [NAME] — Rome owes you a debt.`,
+
+  time_warning_10: `(An urgent whisper from a slave boy) <em>Domine Cicerō — decem minūtae supersunt.</em> Ten minutes remain. The conspirators grow bolder by the hour.`,
+
+  time_warning_5: `<em>Quinque minūtae! Five minutes, [NAME]. Whatever you have uncovered must be enough.</em>`,
+
+  timeout_gate0: `The time has run out, [NAME], and we have not gathered enough to act. Catiline's men have slipped away into the night. Rome will survive — she always does — but the conspiracy will fester until next year. 
+
+Come back better prepared. Study your vocabulary, your verb forms, your Roman history. Rome needs agents who are ready.
+
+<strong>Your mission ended before the first gate.</strong> Questions answered: [ANSWERED]. Submit your results below.`,
+
+  timeout_gate1: `The hour glass has emptied, [NAME]. But you did not fail entirely — you found the meeting place. The Senate has been quietly alerted. Catiline will be watched.
+
+It was not the full victory Rome needed, but it was something.
+
+<strong>Gate I reached — The Meeting Place discovered.</strong> Questions answered: [ANSWERED]. Your proof phrase: <strong>VIA·FALCARIA·[CODE]</strong>
+
+Submit your results below.`,
+
+  timeout_gate2: `Time has run out — but what you have achieved is remarkable. You intercepted the letter, confirmed the conspirators' names, and gave Rome the evidence she needed. Catiline is exposed, if not yet defeated.
+
+<strong>Gate II reached — The Letter Intercepted.</strong> Questions answered: [ANSWERED]. Your proof phrase: <strong>EPISTULA·INTERCEPTA·[CODE]</strong>
+
+Submit your results below.`,
+};
+
+// ── Story question bank — pre-authored for Lesson 6 ──
+// Organized by gate; each gate has its own question set
+const STORY_QUESTION_BANK = {
+  gate1: [
+    { q: `I have received a report using a word I must verify. The verb <span class="latin">cōnspīrāvērunt</span> — what does it mean in English, and what tense is it?`,
+      a: `they conspired / they have conspired; perfect active`, pts:3,
+      context:`The very word names what Catiline's men have done — conspired, in the perfect tense. <span class="latin">Cōnspīrāvērunt</span> comes from <span class="latin">cōnspīrō, cōnspīrāre, cōnspīrāvī</span>.` },
+    { q: `A spy's note reads: <span class="latin">"Catilīna in domum Laecae vēnit."</span> What does <span class="latin">vēnit</span> mean here, and what are its principal parts?`,
+      a: `he came; venio, venire, veni, ventum`, pts:3,
+      context:`<span class="latin">Vēnit</span> (long ē) is perfect — "he came." Compare <span class="latin">venit</span> (short e), which is present — "he comes." The length of that vowel changes everything.` },
+    { q: `What Roman office did Cicero hold in 63 BC, the year of the conspiracy?`,
+      a: `consul`, pts:2,
+      context:`Cicero was consul — the highest elected office in the Roman Republic, held for one year by two men simultaneously.` },
+    { q: `Give the perfect active first person singular of <span class="latin">scrībō, scrībere</span>.`,
+      a: `scripsī`, pts:2,
+      context:`<span class="latin">Scrīpsī</span> — "I wrote." The principal parts are <span class="latin">scrībō, scrībere, scrīpsī, scrīptum</span>.` },
+    { q: `My informant writes: <span class="latin">"Senātōrēs perīculum vīdērunt."</span> What does this sentence mean in English?`,
+      a: `The senators saw / have seen the danger`, pts:3,
+      context:`<span class="latin">Vīdērunt</span> is the perfect active third person plural of <span class="latin">videō</span> — they saw, or they have seen.` },
+    { q: `What Latin word, derived from <span class="latin">coniungō</span>, did Romans use for a political conspiracy?`,
+      a: `coniuratio`, pts:2,
+      context:`<span class="latin">Coniūrātiō</span> — literally "a swearing together." The conspirators swore an oath together, binding themselves to the plot.` },
+  ],
+  gate2: [
+    { q: `The intercepted letter begins: <span class="latin">"Exercitum parāvī."</span> Translate this, and identify the tense and person of the verb.`,
+      a: `I have prepared / prepared an army; perfect active first person singular`, pts:3,
+      context:`<span class="latin">Parāvī</span> is the perfect of <span class="latin">parō, parāre</span>. Catiline boasts of what he has already accomplished.` },
+    { q: `Give all four principal parts of <span class="latin">mittō</span> (to send).`,
+      a: `mitto, mittere, misi, missum`, pts:3,
+      context:`<span class="latin">Mittō, mittere, mīsī, missum</span>. The perfect <span class="latin">mīsī</span> was crucial — Catiline had "sent" agents throughout Italy.` },
+    { q: `Who were the Allobrogian Gauls, and why were they significant in exposing the conspiracy?`,
+      a: `A Gallic tribe whose ambassadors in Rome were approached by the conspirators; they reported the plot to Cicero instead`, pts:3,
+      context:`The Allobroges were visiting Rome to plead grievances. Catiline's associate Lentulus foolishly recruited them — and they went straight to Cicero with the evidence.` },
+    { q: `<span class="latin">Lentulus epistulam scrīpsit et anulō suō sīgnāvit.</span> What does this sentence mean?`,
+      a: `Lentulus wrote a letter and sealed it with his ring`, pts:3,
+      context:`<span class="latin">Scrīpsit</span> and <span class="latin">sīgnāvit</span> are both perfect active third person singular. That sealed letter became the most damning piece of evidence against him.` },
+    { q: `What does the Latin phrase <span class="latin">senātus cōnsultum ultimum</span> mean, and when was it invoked?`,
+      a: `The final decree of the Senate — emergency powers granted to the consuls to defend the state; invoked in 63 BC against the Catilinarian conspirators`, pts:2,
+      context:`The <span class="latin">SCU</span> was Rome's version of martial law — it suspended normal legal protections and gave the consuls authority to act by any means necessary.` },
+    { q: `Give the perfect active third person plural of <span class="latin">capiō, capere, cēpī</span>.`,
+      a: `ceperunt`, pts:2,
+      context:`<span class="latin">Cēpērunt</span> — "they seized/captured." The conspirators had planned to seize Rome itself.` },
+  ],
+  gate3: [
+    { q: `In his First Catilinarian Speech, Cicero asks: <span class="latin">"Quō usque tandem abūtēre, Catilīna, patientiā nostrā?"</span> What is the gist of this famous opening? (You don't need to translate word for word.)`,
+      a: `How long will you abuse our patience, Catiline? / When will this go too far?`, pts:4,
+      context:`"How long, Catiline, will you abuse our patience?" — one of the most famous openings in Latin literature. Cicero was addressing Catiline directly in the Senate.` },
+    { q: `What single perfect tense word did Cicero famously use to announce the execution of the conspirators to the Roman people?`,
+      a: `vixerunt`, pts:3,
+      context:`<span class="latin">Vīxērunt</span> — "they have lived," a Roman euphemism for "they are dead." Perfect tense of <span class="latin">vīvō, vīvere, vīxī</span>. Cicero's single word told the crowd everything.` },
+    { q: `Give the perfect active of <span class="latin">vīvō, vīvere, vīxī</span> in the third person plural.`,
+      a: `vixerunt`, pts:2,
+      context:`<span class="latin">Vīxērunt</span> — the very word Cicero used. Now you understand exactly why it was so powerful.` },
+    { q: `<span class="latin">Cīvēs Rōmānī coniūrātōs in carcere posuērunt.</span> Translate this sentence.`,
+      a: `The Roman citizens put the conspirators in prison`, pts:3,
+      context:`<span class="latin">Posuērunt</span> — perfect of <span class="latin">pōnō, pōnere, posuī</span>. The Tullianum, Rome's ancient prison, was where they were held before execution.` },
+    { q: `What was Cicero's cognomen (third name), and what does it mean in Latin?`,
+      a: `Cicero; it means chickpea (cicer)`, pts:2,
+      context:`<span class="latin">Cicerō</span> comes from <span class="latin">cicer</span>, a chickpea. Family legend said an ancestor had a chickpea-shaped wart on his nose. Cicero joked he would make the name famous despite its humble origin — and he did.` },
+    { q: `Complete the principal parts: <span class="latin">dīcō, dīcere, dīxī, ___</span>.`,
+      a: `dictum`, pts:2,
+      context:`<span class="latin">Dictum</span> — the supine/perfect passive participle of <span class="latin">dīcō</span>. You may know it from the English word "dictum" — something said, a pronouncement.` },
+  ],
+};
+
+function generateStoryCode() {
+  // Short unique code based on student name + timestamp
+  const base = (studentName + Date.now()).split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  let n = base;
+  for (let i = 0; i < 6; i++) { code += chars[n % chars.length]; n = Math.floor(n/chars.length) + 17; }
+  return code;
+}
+
+let storyCode = '';
+
+function storyFill(template) {
+  return template
+    .replace(/\[NAME\]/g, studentName)
+    .replace(/\[CODE\]/g, storyCode)
+    .replace(/\[ANSWERED\]/g, storyTotalQAnswered);
+}
+
+// ── Story messages ──
+const storyMessagesEl = document.getElementById('story-messages');
+const storyInput = document.getElementById('story-input');
+const storySendBtn = document.getElementById('story-send-btn');
+
+function storyAddMessage(role, html, extraClass) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + (role==='user'?'user':'bot');
+  const av = document.createElement('div');
+  av.className = 'msg-avatar';
+  if (role==='user') {
+    av.className += ' user-av';
+    av.textContent = studentName.charAt(0).toUpperCase();
+  } else if (role==='narrator') {
+    av.className += ' story-av-narrator';
+    av.textContent = 'S';
+  } else {
+    av.className += ' story-av-cicero';
+    av.innerHTML = document.querySelector('.cicero-av')?.innerHTML || 'C';
+  }
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble ' + (extraClass||'');
+  if (role==='narrator') bubble.classList.add('story-bubble-narrator');
+  else if (role==='bot') bubble.classList.add('story-bubble-cicero');
+  bubble.innerHTML = html;
+  wrap.appendChild(av); wrap.appendChild(bubble);
+  storyMessagesEl.appendChild(wrap);
+  storyMessagesEl.scrollTop = storyMessagesEl.scrollHeight;
+}
+
+function storyShowTyping() {
+  const w=document.createElement('div'); w.className='msg bot'; w.id='story-typing';
+  const av=document.createElement('div'); av.className='msg-avatar story-av-cicero';
+  av.innerHTML = document.querySelector('.cicero-av')?.innerHTML || 'C';
+  const b=document.createElement('div'); b.className='bubble story-bubble-cicero';
+  b.innerHTML='<div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
+  w.appendChild(av); w.appendChild(b); storyMessagesEl.appendChild(w);
+  storyMessagesEl.scrollTop = storyMessagesEl.scrollHeight;
+}
+function storyRemoveTyping() { const t=document.getElementById('story-typing'); if(t)t.remove(); }
+
+function setStoryInputEnabled(enabled) {
+  storyInput.disabled = !enabled;
+  storySendBtn.disabled = !enabled;
+  if (enabled) setTimeout(()=>storyInput.focus(), 100);
+}
+
+// ── Timer ──
+function formatStoryTime(secs) {
+  const m = Math.floor(secs/60);
+  const s = secs % 60;
+  return m + ':' + String(s).padStart(2,'0');
+}
+
+function startStoryTimer() {
+  clearInterval(storyTimerInt);
+  storyTimerInt = setInterval(async () => {
+    storyTimeLeft--;
+    document.getElementById('story-timer-display').textContent = formatStoryTime(storyTimeLeft);
+    if (storyTimeLeft === 10*60) {
+      storyAddMessage('narrator', storyFill(STORY_CONTENT.time_warning_10));
+    }
+    if (storyTimeLeft === 5*60) {
+      storyAddMessage('narrator', storyFill(STORY_CONTENT.time_warning_5));
+    }
+    if (storyTimeLeft <= 0) {
+      clearInterval(storyTimerInt);
+      if (!storyDone) endStory(true);
+    }
+    // Warning colour
+    if (storyTimeLeft <= 5*60) {
+      document.getElementById('story-timer-display').style.color = '#E05050';
+    }
+  }, 1000);
+}
+
+// ── Gate progress ──
+function updateStoryProgress() {
+  const totalGateQs = 18; // gate 3 threshold
+  const pct = Math.min(100, Math.round((storyTotalQAnswered / totalGateQs) * 100));
+  document.getElementById('story-progress-bar').style.width = pct + '%';
+
+  let gateLabel = 'Prologue';
+  if (storyTotalQAnswered >= 18) gateLabel = 'Gate III — The Senate';
+  else if (storyTotalQAnswered >= 12) gateLabel = 'Approaching Gate III';
+  else if (storyTotalQAnswered >= 6) gateLabel = 'Gate II — The Letter';
+  else if (storyTotalQAnswered > 0) gateLabel = 'Gate I — The Meeting Place';
+  document.getElementById('story-gate-label').textContent = gateLabel;
+  document.getElementById('story-score-display').textContent = storyScore + ' pts';
+}
+
+// ── Question presentation ──
+function currentGateBank() {
+  if (storyTotalQAnswered < 6) return STORY_QUESTION_BANK.gate1;
+  if (storyTotalQAnswered < 12) return STORY_QUESTION_BANK.gate2;
+  return STORY_QUESTION_BANK.gate3;
+}
+
+function currentQuestionInBank() {
+  if (storyTotalQAnswered < 6) return storyTotalQAnswered;
+  if (storyTotalQAnswered < 12) return storyTotalQAnswered - 6;
+  return storyTotalQAnswered - 12;
+}
+
+function presentStoryQuestion() {
+  if (storyDone) return;
+  const bank = currentGateBank();
+  const idx = currentQuestionInBank();
+  if (idx >= bank.length) {
+    // Ran out of questions in this gate — loop or end
+    endStory(false);
+    return;
+  }
+  const q = bank[idx];
+  storyAddMessage('bot', `<strong>Q${storyTotalQAnswered+1}:</strong> ${q.q}`);
+  setStoryInputEnabled(true);
+  document.getElementById('story-hint-bar').textContent =
+    `Hints remaining: ${storyHints} — type "hint" · Enter to submit · Time: ${formatStoryTime(storyTimeLeft)}`;
+  storyAwaitingNext = false;
+  storyProcessing = false;
+}
+
+// ── Evaluate answer ──
+async function evaluateStoryAnswer(text) {
+  const bank = currentGateBank();
+  const idx = currentQuestionInBank();
+  const q = bank[idx];
+
+  storyShowTyping(); setStoryInputEnabled(false); storyProcessing = true;
+
+  const evalPrompt = `You are Cicero — warm, grandfatherly, briefly dramatic. Evaluate this Latin student answer in the context of the Catilinarian Conspiracy story.
+Question: ${stripHtml(q.q)}
+Model answer: ${q.a}
+Student answered: ${text}
+Max points: ${q.pts}
+
+EVALUATION RULES:
+1. Any ONE correct option earns full marks if multiple valid answers exist.
+2. Latin verb forms: accept any valid pronoun rendering (he/she/it).
+3. No macrons required from student. "vixerunt" = "vīxērunt".
+4. No article penalty ("the conspiracy" = "conspiracy").
+5. If answer is defensible from a different valid grammatical reading, award full marks.
+6. Keep feedback to 2 sentences. Weave it into the story — this is a dramatic investigation.
+7. If correct, show enthusiasm. If wrong, stay warm and give the correct answer with a brief explanation.
+
+Return ONLY valid JSON: {"verdict":"correct"|"partial"|"wrong","awarded":N,"feedback":"..."}`;
+
+  const storyCiceroSystem = `You are Marcus Tullius Cicero — warm, grandfatherly, briefly dramatic. You are evaluating a student's answer during the Catilinarian Conspiracy story activity for the course Introduction to Roman Culture and Language I (LAT1010). Keep feedback to 2 sentences, weave it into the story narrative. Return ONLY valid JSON: {"verdict":"correct"|"partial"|"wrong","awarded":N,"feedback":"..."}`;
+
+  try {
+    const data = await apiFetch({ max_tokens:250, system:storyCiceroSystem, messages:[{role:'user',content:evalPrompt}] });
+    let raw = (data.content?.[0]?.text||'{}').replace(/```json|```/g,'').trim();
+    const m = raw.match(/\{[\s\S]*\}/);
+    const result = JSON.parse(m?m[0]:raw);
+    storyRemoveTyping();
+
+    const verdict = result.verdict || 'wrong';
+    const awarded = Math.min(clamp(result.awarded||0), q.pts);
+    storyScore += awarded;
+    storyTotalQAnswered++;
+
+    const rClass = verdict==='correct'?'story-bubble-result-correct':'story-bubble-result-wrong';
+    const ptStr = awarded===q.pts?`+${awarded} pts`:awarded>0?`+${awarded}/${q.pts} pts`:`0/${q.pts} pts`;
+    storyAddMessage('bot', `<strong>${ptStr}</strong> — ${result.feedback} <em style="font-size:12px;opacity:0.7;">(${q.context})</em>`, rClass);
+    updateStoryProgress();
+
+    // Check gate unlock
+    const gateJustReached = STORY_GATES.find(g => g.threshold === storyTotalQAnswered);
+    if (gateJustReached) {
+      await unlockGate(gateJustReached.num);
+      return;
+    }
+
+    // Next question
+    storyProcessing = false;
+    setTimeout(() => {
+      storyAddMessage('bot', '<em>Press Enter when ready for the next clue.</em>');
+      storyAwaitingNext = true;
+      setStoryInputEnabled(true);
+      document.getElementById('story-hint-bar').textContent =
+        `Type anything and press Enter to continue · Hints: ${storyHints}`;
+    }, 1200);
+
+  } catch(e) {
+    storyRemoveTyping();
+    storyAddMessage('bot',`<em>Error evaluating answer: ${escHtml(e.message)}. Press Enter to try again or continue.</em>`);
+    storyProcessing = false;
+    storyAwaitingNext = true;
+    setStoryInputEnabled(true);
+  }
+}
+
+// ── Gate unlock ──
+async function unlockGate(gateNum) {
+  storyProcessing = true;
+  setStoryInputEnabled(false);
+
+  const key = 'gate' + gateNum + '_reveal';
+  const reveal = STORY_CONTENT[key];
+
+  // Dramatic divider
+  const div = document.createElement('div');
+  div.className = 'story-divider';
+  div.innerHTML = '⚔ ' + STORY_GATES[gateNum-1].label + ' ⚔';
+  storyMessagesEl.appendChild(div);
+
+  storyAddMessage('narrator', storyFill(reveal), 'story-bubble-gate');
+
+  if (gateNum === 3) {
+    // Final gate — story complete
+    endStory(false);
+    return;
+  }
+
+  // Continue to next gate
+  storyProcessing = false;
+  setTimeout(() => {
+    storyAddMessage('bot', '<em>The investigation continues. Press Enter when you are ready for the next clue.</em>');
+    storyAwaitingNext = true;
+    setStoryInputEnabled(true);
+  }, 1500);
+}
+
+// ── End story ──
+function endStory(timeout) {
+  if (storyDone) return;
+  storyDone = true;
+  clearInterval(storyTimerInt);
+  setStoryInputEnabled(false);
+
+  let endContent;
+  if (!timeout) {
+    // Completed gate 3
+    document.getElementById('story-hint-bar').textContent = 'Story complete! Submit your results below.';
+    return; // gate3_reveal already shown with submit button
+  }
+
+  // Timeout endings
+  if (storyTotalQAnswered < 6)       endContent = storyFill(STORY_CONTENT.timeout_gate0);
+  else if (storyTotalQAnswered < 12)  endContent = storyFill(STORY_CONTENT.timeout_gate1);
+  else                                endContent = storyFill(STORY_CONTENT.timeout_gate2);
+
+  storyAddMessage('narrator', endContent, 'story-bubble-gate');
+  document.getElementById('story-hint-bar').textContent = 'Time is up. Submit your results below.';
+  addStorySubmitButton();
+}
+
+function addStorySubmitButton() {
+  setTimeout(() => {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg bot';
+    const av = document.createElement('div');
+    av.className = 'msg-avatar story-av-cicero';
+    av.innerHTML = document.querySelector('.cicero-av')?.innerHTML || 'C';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble story-bubble-cicero';
+    bubble.innerHTML = `<strong>Submit your results, ${escHtml(studentName)}.</strong> Click below to send your performance to your professor. <em>This is required to complete the activity.</em><br><br>
+      <button id="story-submit-btn" style="padding:10px 22px;background:#2C1810;color:#D4AF37;border:1px solid rgba(212,175,55,0.5);border-radius:var(--radius,6px);font-family:'Helvetica Neue',sans-serif;font-size:14px;cursor:pointer;">
+        📤 Submit results to professor
+      </button>
+      <div id="story-submit-status" style="margin-top:10px;font-size:13px;font-family:'Helvetica Neue',sans-serif;min-height:18px;"></div>`;
+    wrap.appendChild(av); wrap.appendChild(bubble);
+    storyMessagesEl.appendChild(wrap);
+    storyMessagesEl.scrollTop = storyMessagesEl.scrollHeight;
+
+    document.getElementById('story-submit-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('story-submit-btn');
+      const status = document.getElementById('story-submit-status');
+      btn.textContent = '⏳ Submitting…'; btn.disabled = true;
+      try {
+        const gateReached = storyTotalQAnswered >= 18 ? 3 : storyTotalQAnswered >= 12 ? 2 : storyTotalQAnswered >= 6 ? 1 : 0;
+        const timeTaken = Math.round((STORY_TIME_LIMIT - storyTimeLeft) / 60);
+        const payload = {
+          student_name: studentName || 'Unknown',
+          lesson: 'Story: Coniūrātiō (Lesson 6)',
+          quiz_score: storyScore,
+          quiz_max: 60,
+          quiz_pct: Math.round((storyScore/60)*100),
+          flagged_count: 0,
+          tab_switches: storyTabSwitches.length,
+          report_text: `MAGISTER — STORY REPORT\nStudent: ${studentName}\nActivity: Coniūrātiō — The Conspiracy of Catiline\nGate reached: ${gateReached} of 3\nQuestions answered: ${storyTotalQAnswered}\nScore: ${storyScore} pts\nTime taken: ~${timeTaken} min\nProof code: ${storyCode}\nTab switches: ${storyTabSwitches.length}`
+        };
+        const submitUrl = WORKER_URL.endsWith('/') ? WORKER_URL + 'submit-report' : WORKER_URL + '/submit-report';
+        const resp = await fetch(submitUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+        const result = await resp.json();
+        if (result.ok) {
+          btn.textContent = '✓ Submitted!'; btn.style.background = '#2D6A4F'; btn.style.borderColor = '#2D6A4F';
+          status.textContent = 'Your professor has received your results. Vale!'; status.style.color = '#2D6A4F';
+        } else throw new Error(result.error||'Unknown');
+      } catch(e) {
+        btn.textContent = '📤 Submit results to professor'; btn.disabled = false;
+        status.textContent = 'Something went wrong — please try again.'; status.style.color = 'var(--red,#8B1A1A)';
+      }
+    });
+  }, 600);
+}
+
+// ── Submit answer ──
+async function submitStoryAnswer() {
+  const rawText = storyInput.value.trim();
+
+  // Hint
+  if (/\bhint\b/i.test(rawText)) {
+    storyInput.value=''; storyInput.style.height='auto';
+    if (storyHints <= 0) { storyAddMessage('bot','<em>No hints remaining, I am afraid!</em>'); return; }
+    storyHints--;
+    const bank = currentGateBank();
+    const idx = currentQuestionInBank();
+    const q = bank[idx];
+    const hintPrompt = `You are Cicero. Give a one-sentence hint for this question without giving away the answer. Keep it dramatic and story-appropriate. Question: ${stripHtml(q.q)} Answer: ${q.a}`;
+    storyShowTyping();
+    try {
+      const data = await apiFetch({ max_tokens:100, messages:[{role:'user',content:hintPrompt}] });
+      storyRemoveTyping();
+      storyAddMessage('bot', '💡 <em>' + (data.content?.[0]?.text||'Think carefully about what you know.') + '</em>');
+    } catch(e) { storyRemoveTyping(); storyAddMessage('bot','💡 <em>Think carefully about the Latin roots of the words involved.</em>'); }
+    document.getElementById('story-hint-bar').textContent = `Hints remaining: ${storyHints} · Enter to submit`;
+    return;
+  }
+
+  // Awaiting next
+  if (storyAwaitingNext) {
+    if (!rawText) return;
+    storyInput.value=''; storyInput.style.height='auto';
+    storyAwaitingNext = false;
+    setStoryInputEnabled(false);
+    setTimeout(() => presentStoryQuestion(), 300);
+    return;
+  }
+
+  if (storyProcessing || storyDone || !rawText) return;
+  storyInput.value=''; storyInput.style.height='auto';
+  storyAddMessage('user', escHtml(rawText));
+  await evaluateStoryAnswer(rawText);
+}
+
+storySendBtn.addEventListener('click', submitStoryAnswer);
+storyInput.addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();submitStoryAnswer();} });
+storyInput.addEventListener('input', ()=>{ storyInput.style.height='auto'; storyInput.style.height=Math.min(storyInput.scrollHeight,120)+'px'; });
+
+// ── Init ──
+function initStory() {
+  storyActive=true; storyDone=false; storyScore=0; storyQIndex=0;
+  storyGate=0; storyHints=3; storyProcessing=false; storyAwaitingNext=false;
+  storyTotalQAnswered=0; storyTimeLeft=STORY_TIME_LIMIT;
+  storyTabSwitches=[]; storyTabHiddenAt=null;
+  storyCode = generateStoryCode();
+  storyMessagesEl.innerHTML='';
+  document.getElementById('story-timer-display').textContent = '30:00';
+  document.getElementById('story-timer-display').style.color = '#D4AF37';
+  document.getElementById('story-score-display').textContent = '0 pts';
+  document.getElementById('story-progress-bar').style.width = '0%';
+  document.getElementById('story-gate-label').textContent = 'Prologue';
+  setStoryInputEnabled(false);
+
+  // Show prologue
+  const prologueText = storyFill(STORY_CONTENT.prologue);
+  storyAddMessage('narrator', prologueText.replace(/\n/g,'<br>'), 'story-bubble-gate');
+
+  setTimeout(() => {
+    storyAddMessage('bot', '<em>Press Enter when you are ready to begin the investigation.</em>');
+    storyAwaitingNext = true;
+    setStoryInputEnabled(true);
+    document.getElementById('story-hint-bar').textContent = 'Press Enter to start · 30 minutes on the clock';
+    // Start timer when student presses Enter (handled in submitStoryAnswer first call)
+    const origAwait = storyAwaitingNext;
+    // Override: start timer on first Enter
+    const startOnEnter = () => {
+      startStoryTimer();
+      storyInput.removeEventListener('keydown', startOnEnter);
+    };
+    storyInput.addEventListener('keydown', function onFirst(e) {
+      if (e.key==='Enter'&&!e.shiftKey) { startStoryTimer(); storyInput.removeEventListener('keydown',onFirst); }
+    });
+  }, 800);
+}
+
+// ── Tab visibility for story ──
+document.addEventListener('visibilitychange', () => {
+  if (!storyActive || storyDone) return;
+  if (document.hidden) {
+    storyTabHiddenAt = Date.now();
+  } else if (storyTabHiddenAt !== null) {
+    const duration = Math.round((Date.now()-storyTabHiddenAt)/1000);
+    storyTabHiddenAt = null;
+    if (duration >= 5) {
+      storyTabSwitches.push({ duration, timestamp: new Date().toLocaleTimeString() });
+      storyAddMessage('bot', `<em>⚠ You left the tab for ${duration} seconds, ${escHtml(studentName)}. This has been logged.</em>`);
+    }
+  }
+});
+
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function stripHtml(s){return String(s).replace(/<[^>]*>/g,'');}
 </script>
